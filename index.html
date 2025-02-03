@@ -1,241 +1,341 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Advanced Battle Tanks</title>
-    <style>/* ... предыдущие стили ... */</style>
+    <title>Procedural Tanks</title>
+    <style>
+        canvas {
+            border: 2px solid #333;
+            background: #000;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: #444;
+        }
+    </style>
 </head>
 <body>
     <canvas id="gameCanvas" width="416" height="416"></canvas>
-    <div id="hud">Score: <span id="score">0</span> | Level: <span id="level">1</span></div>
     
     <script>
-        // ... предыдущие константы и переменные ...
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const TILE_SIZE = 32;
+        const MAP_SIZE = 13;
         
-        const POWERUP_TYPES = ['health', 'speed', 'ammo'];
-        let powerups = [];
-        let score = 0;
-        let level = 1;
-        let playerHealth = 100;
-        let ammoType = 'normal';
+        let player = {
+            x: 6 * TILE_SIZE,
+            y: 12 * TILE_SIZE,
+            direction: 0,
+            speed: 2
+        };
         
-        // Генерация улучшенной карты
+        let bullets = [];
+        let enemies = [];
+        let map = [];
+        
+        // Типы тайлов
+        const TILE_TYPES = {
+            EMPTY: 0,
+            BRICK: 1,
+            STEEL: 2,
+            WATER: 3
+        };
+        
+        // Генерация карты
         function generateMap() {
-            // Используем клеточный автомат для генерации лабиринта
-            let newMap = Array(MAP_SIZE).fill().map(() => 
-                Array(MAP_SIZE).fill().map(() => 
-                    Math.random() < 0.45 ? TILE_TYPES.BRICK : TILE_TYPES.EMPTY
-                )
-            );
-            
-            // Сглаживание
-            for(let i = 0; i < 5; i++) {
-                newMap = newMap.map((row, y) => row.map((cell, x) => {
-                    const neighbors = countNeighbors(newMap, x, y);
-                    return neighbors >= 5 ? TILE_TYPES.BRICK : TILE_TYPES.EMPTY;
-                }));
-            }
-            
-            // Добавление специальных зон
-            addLake(newMap);
-            addMaze(newMap);
-            map = newMap;
-        }
-        
-        function countNeighbors(map, x, y) {
-            let count = 0;
-            for(let dy = -1; dy <= 1; dy++) {
-                for(let dx = -1; dx <= 1; dx++) {
-                    const nx = x + dx;
-                    const ny = y + dy;
-                    if(nx >= 0 && nx < MAP_SIZE && ny >= 0 && ny < MAP_SIZE && map[ny][nx]) {
-                        count++;
+            map = [];
+            // Заполнение случайными блоками
+            for(let y = 0; y < MAP_SIZE; y++) {
+                map[y] = [];
+                for(let x = 0; x < MAP_SIZE; x++) {
+                    if(Math.random() < 0.3 && x > 2 && x < MAP_SIZE-3 && y > 2) {
+                        map[y][x] = Math.random() < 0.7 ? TILE_TYPES.BRICK : TILE_TYPES.STEEL;
+                    } else {
+                        map[y][x] = TILE_TYPES.EMPTY;
                     }
                 }
             }
-            return count;
-        }
-        
-        // Вражеские танки
-        class EnemyTank {
-            constructor() {
-                this.x = Math.floor(Math.random() * MAP_SIZE) * TILE_SIZE;
-                this.y = 0;
-                this.direction = Math.floor(Math.random() * 4);
-                this.speed = 1 + level * 0.2;
-                this.aiState = 'patrol';
-                this.shootCooldown = 1000;
-                this.lastShot = 0;
-            }
             
-            update() {
-                // Простое ИИ: 30% шанс сменить направление
-                if(Math.random() < 0.3) {
-                    this.direction = Math.floor(Math.random() * 4);
-                }
-                
-                // Движение
-                const move = this.getMoveDirection();
-                this.x += move.dx * this.speed;
-                this.y += move.dy * this.speed;
-                
-                // Стрельба
-                if(Date.now() - this.lastShot > this.shootCooldown) {
-                    this.shoot();
-                    this.lastShot = Date.now();
+            // Добавление воды
+            for(let i = 0; i < 3; i++) {
+                const waterX = Math.floor(Math.random() * (MAP_SIZE-3));
+                const waterY = Math.floor(Math.random() * (MAP_SIZE-3));
+                for(let y = waterY; y < waterY+2; y++) {
+                    for(let x = waterX; x < waterX+3; x++) {
+                        map[y][x] = TILE_TYPES.WATER;
+                    }
                 }
             }
             
-            getMoveDirection() {
-                const directions = [
-                    {dx: 0, dy: -1}, // up
-                    {dx: 1, dy: 0},  // right
-                    {dx: 0, dy: 1},  // down
-                    {dx: -1, dy: 0}  // left
-                ];
-                return directions[this.direction];
-            }
-            
-            shoot() {
-                bullets.push({
-                    x: this.x + TILE_SIZE/2,
-                    y: this.y + TILE_SIZE/2,
-                    direction: this.direction,
-                    speed: 4,
-                    type: 'enemy'
-                });
+            // Гарантированные проходы
+            for(let y = 0; y < MAP_SIZE; y++) {
+                map[y][5] = TILE_TYPES.EMPTY;
+                map[y][6] = TILE_TYPES.EMPTY;
+                map[y][7] = TILE_TYPES.EMPTY;
             }
         }
         
-        // Система бонусов
-        class Powerup {
-            constructor(x, y) {
-                this.x = x;
-                this.y = y;
-                this.type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
-            }
-            
-            apply() {
-                switch(this.type) {
-                    case 'health':
-                        playerHealth = Math.min(100, playerHealth + 30);
-                        break;
-                    case 'speed':
-                        player.speed += 0.5;
-                        setTimeout(() => player.speed -= 0.5, 10000);
-                        break;
-                    case 'ammo':
-                        ammoType = 'double';
-                        setTimeout(() => ammoType = 'normal', 5000);
-                        break;
+        // Отрисовка карты
+        function drawMap() {
+            for(let y = 0; y < MAP_SIZE; y++) {
+                for(let x = 0; x < MAP_SIZE; x++) {
+                    switch(map[y][x]) {
+                        case TILE_TYPES.BRICK:
+                            ctx.fillStyle = '#8B4513';
+                            ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                            break;
+                        case TILE_TYPES.STEEL:
+                            ctx.fillStyle = '#808080';
+                            ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                            break;
+                        case TILE_TYPES.WATER:
+                            ctx.fillStyle = '#0000FF';
+                            ctx.fillRect(x*TILE_SIZE, y*TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                            break;
+                    }
                 }
             }
         }
         
-        // Расширенная обработка столкновений
-        function checkCollision(x, y, type) {
+        // Отрисовка танка
+        function drawTank(tank, color) {
+            ctx.save();
+            ctx.translate(tank.x + TILE_SIZE/2, tank.y + TILE_SIZE/2);
+            ctx.rotate(tank.direction * Math.PI/2);
+            ctx.fillStyle = color;
+            ctx.fillRect(-TILE_SIZE/2, -TILE_SIZE/2, TILE_SIZE, TILE_SIZE);
+            ctx.fillStyle = '#FF0000';
+            ctx.fillRect(TILE_SIZE/4, -TILE_SIZE/4, TILE_SIZE/2, TILE_SIZE/2);
+            ctx.restore();
+        }
+        
+        // Обработка столкновений
+        function checkCollision(x, y) {
             const tileX = Math.floor(x / TILE_SIZE);
             const tileY = Math.floor(y / TILE_SIZE);
             
-            if(tileX < 0 || tileX >= MAP_SIZE || tileY < 0 || tileY >= MAP_SIZE) return true;
+            if(tileX < 0 || tileX >= MAP_SIZE || tileY < 0 || tileY >= MAP_SIZE) {
+                return true;
+            }
             
-            const tile = map[tileY][tileX];
-            const isObstacle = tile === TILE_TYPES.BRICK || tile === TILE_TYPES.STEEL;
-            
-            // Проверка воды для движения
-            if(type === 'movement' && tile === TILE_TYPES.WATER) return true;
-            
-            return isObstacle;
+            return map[tileY][tileX] === TILE_TYPES.BRICK || 
+                   map[tileY][tileX] === TILE_TYPES.STEEL;
         }
         
-        // Обновленная система стрельбы
+        // Обновление игрока
+        function updatePlayer() {
+            let newX = player.x;
+            let newY = player.y;
+            
+            if(keys.ArrowUp) {
+                player.direction = 0;
+                newY -= player.speed;
+            }
+            if(keys.ArrowDown) {
+                player.direction = 2;
+                newY += player.speed;
+            }
+            if(keys.ArrowLeft) {
+                player.direction = 3;
+                newX -= player.speed;
+            }
+            if(keys.ArrowRight) {
+                player.direction = 1;
+                newX += player.speed;
+            }
+            
+            if(!checkCollision(newX, newY) &&
+               !checkCollision(newX + TILE_SIZE-1, newY) &&
+               !checkCollision(newX, newY + TILE_SIZE-1) &&
+               !checkCollision(newX + TILE_SIZE-1, newY + TILE_SIZE-1)) {
+                player.x = newX;
+                player.y = newY;
+            }
+        }
+        
+        // Обработка стрельбы
         function fireBullet() {
-            if(ammoType === 'double') {
-                bullets.push(createBullet(-5), createBullet(5));
-            } else {
-                bullets.push(createBullet(0));
-            }
-        }
-        
-        function createBullet(offset) {
-            return {
-                x: player.x + TILE_SIZE/2 + offset,
-                y: player.y + TILE_SIZE/2 + offset,
+            bullets.push({
+                x: player.x + TILE_SIZE/2,
+                y: player.y + TILE_SIZE/2,
                 direction: player.direction,
-                speed: 5,
-                type: 'player'
-            };
+                speed: 5
+            });
         }
         
-        // Обновленная система уровней
-        function nextLevel() {
-            level++;
-            document.getElementById('level').textContent = level;
-            generateMap();
-            spawnEnemies();
+        // Обновление пуль
+        function updateBullets() {
+            bullets.forEach((bullet, index) => {
+                switch(bullet.direction) {
+                    case 0: bullet.y -= bullet.speed; break;
+                    case 1: bullet.x += bullet.speed; break;
+                    case 2: bullet.y += bullet.speed; break;
+                    case 3: bullet.x -= bullet.speed; break;
+                }
+                
+                // Проверка столкновений
+                if(checkCollision(bullet.x, bullet.y)) {
+                    const tileX = Math.floor(bullet.x / TILE_SIZE);
+                    const tileY = Math.floor(bullet.y / TILE_SIZE);
+                    if(map[tileY][tileX] === TILE_TYPES.BRICK) {
+                        map[tileY][tileX] = TILE_TYPES.EMPTY;
+                    }
+                    bullets.splice(index, 1);
+                }
+            });
         }
         
-        function spawnEnemies() {
-            for(let i = 0; i < 2 + level; i++) {
-                enemies.push(new EnemyTank());
-            }
+        // Отрисовка пуль
+        function drawBullets() {
+            ctx.fillStyle = '#FFFF00';
+            bullets.forEach(bullet => {
+                ctx.beginPath();
+                ctx.arc(bullet.x, bullet.y, 3, 0, Math.PI*2);
+                ctx.fill();
+            });
         }
         
-        // Обновленный игровой цикл
+        // Обработка ввода
+        let keys = {};
+        window.addEventListener('keydown', e => {
+            keys[e.key] = true;
+            if(e.code === 'Space') fireBullet();
+        });
+        window.addEventListener('keyup', e => {
+            keys[e.key] = false;
+        });
+        
+        // Игровой цикл
         function gameLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // Обновление объектов
-            updatePlayer();
-            enemies.forEach(enemy => enemy.update());
-            updateBullets();
-            updatePowerups();
-            
-            // Отрисовка
             drawMap();
-            drawTank(player, '#00FF00');
-            enemies.forEach(enemy => drawTank(enemy, '#FF0000'));
-            drawBullets();
-            drawPowerups();
-            drawHUD();
+            updatePlayer();
+            updateBullets();
             
-            // Проверка условий уровня
-            if(enemies.length === 0) nextLevel();
+            drawTank(player, '#00FF00');
+            drawBullets();
             
             requestAnimationFrame(gameLoop);
         }
         
-        // Звуковые эффекты (используем Web Audio API)
-        function playSound(type) {
-            const ctx = new AudioContext();
-            const osc = ctx.createOscillator();
-            const gainNode = ctx.createGain();
-            
-            osc.connect(gainNode);
-            gainNode.connect(ctx.destination);
-            
-            switch(type) {
-                case 'shoot':
-                    osc.frequency.value = 440;
-                    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-                    break;
-                case 'explosion':
-                    osc.frequency.value = 100;
-                    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-                    break;
-            }
-            
-            osc.start();
-            osc.stop(ctx.currentTime + 0.1);
-        }
-        
         // Инициализация игры
-        function initGame() {
-            generateMap();
-            spawnEnemies();
-            gameLoop();
-        }
-        
-        initGame();
+        generateMap();
+        gameLoop();
     </script>
+    let gameActive = true;
+
+// Добавляем отображение здоровья игрока
+function drawHUD() {
+    document.getElementById('score').textContent = score;
+    document.getElementById('level').textContent = level;
+    document.getElementById('health').textContent = playerHealth;
+}
+
+// Функция завершения игры
+function gameOver(victory) {
+    gameActive = false;
+    const gameOverDiv = document.getElementById('game-over');
+    gameOverDiv.style.display = 'block';
+    gameOverDiv.innerHTML = victory ? 
+        '<h2>Победа!</h2><button onclick="location.reload()">Играть снова</button>' :
+        '<h2>Game Over!</h2><button onclick="location.reload()">Попробовать снова</button>';
+}
+
+// Обновленная функция проверки столкновений пуль
+function updateBullets() {
+    bullets.forEach((bullet, index) => {
+        // Обновление позиции
+        switch(bullet.direction) {
+            case 0: bullet.y -= bullet.speed; break;
+            case 1: bullet.x += bullet.speed; break;
+            case 2: bullet.y += bullet.speed; break;
+            case 3: bullet.x -= bullet.speed; break;
+        }
+
+        // Проверка попадания в игрока
+        if(bullet.type === 'enemy') {
+            const distance = Math.sqrt(
+                Math.pow(bullet.x - (player.x + TILE_SIZE/2), 2) +
+                Math.pow(bullet.y - (player.y + TILE_SIZE/2), 2)
+            );
+            if(distance < TILE_SIZE/2) {
+                playerHealth -= 20;
+                bullets.splice(index, 1);
+                if(playerHealth <= 0) gameOver(false);
+                return;
+            }
+        }
+
+        // Проверка столкновения с блоками
+        if(checkCollision(bullet.x, bullet.y)) {
+            const tileX = Math.floor(bullet.x / TILE_SIZE);
+            const tileY = Math.floor(bullet.y / TILE_SIZE);
+            if(map[tileY][tileX] === TILE_TYPES.BRICK) {
+                map[tileY][tileX] = TILE_TYPES.EMPTY;
+                score += 10;
+            }
+            bullets.splice(index, 1);
+        }
+    });
+}
+
+// Модифицированный игровой цикл
+function gameLoop() {
+    if(!gameActive) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    updatePlayer();
+    enemies.forEach(enemy => enemy.update());
+    updateBullets();
+    updatePowerups();
+
+    // Проверка условий завершения игры
+    if(enemies.length === 0) {
+        gameOver(true);
+    }
+    
+    drawMap();
+    drawTank(player, '#00FF00');
+    enemies.forEach(enemy => drawTank(enemy, '#FF0000'));
+    drawBullets();
+    drawPowerups();
+    drawHUD();
+
+    requestAnimationFrame(gameLoop);
+}
+
+// Обновленный HTML (добавить в body):
+<div id="hud">
+    Score: <span id="score">0</span> | 
+    Level: <span id="level">1</span> | 
+    Health: <span id="health">100</span>
+</div>
+<div id="game-over" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 20px; text-align: center;"></div>
+
+// Инициализация игры
+function initGame() {
+    generateMap();
+    spawnEnemies();
+    gameActive = true;
+    playerHealth = 100;
+    score = 0;
+    level = 1;
+    gameLoop();
+}
+
+// Обновленная функция спавна врагов
+function spawnEnemies() {
+    enemies = [];
+    for(let i = 0; i < 20 + level*2; i++) {
+        enemies.push(new EnemyTank());
+    }
+}
+</script>
 </body>
 </html>
