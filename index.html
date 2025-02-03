@@ -337,5 +337,148 @@ function spawnEnemies() {
     }
 }
 </script>
+<script>
+// ... (предыдущий код остаётся без изменений) ...
+
+class EnemyTank {
+    constructor() {
+        // Исправляем спавн в верхней части карты
+        this.x = Math.floor(Math.random() * (MAP_SIZE-2)) * TILE_SIZE + TILE_SIZE;
+        this.y = TILE_SIZE; // Спавн в верхней части
+        this.direction = 2; // Направление вниз по умолчанию
+        this.speed = 1 + level * 0.2;
+        this.aiState = 'patrol';
+        this.shootCooldown = 1000 + Math.random() * 1000;
+        this.lastShot = Date.now();
+        this.active = true;
+    }
+    
+    update() {
+        if (!this.active) return;
+        
+        // Улучшенный ИИ с проверкой границ
+        if (Math.random() < 0.05) {
+            this.direction = Math.floor(Math.random() * 4);
+        }
+        
+        // Сохраняем старую позицию для отката
+        const oldX = this.x;
+        const oldY = this.y;
+        
+        // Движение
+        const move = this.getMoveDirection();
+        this.x += move.dx * this.speed;
+        this.y += move.dy * this.speed;
+        
+        // Проверка столкновений
+        if (this.checkCollision()) {
+            this.x = oldX;
+            this.y = oldY;
+            this.direction = Math.floor(Math.random() * 4);
+        }
+        
+        // Стрельба
+        if (Date.now() - this.lastShot > this.shootCooldown) {
+            this.shoot();
+            this.lastShot = Date.now();
+        }
+    }
+    
+    checkCollision() {
+        return checkCollision(this.x, this.y) ||
+               checkCollision(this.x + TILE_SIZE-1, this.y) ||
+               checkCollision(this.x, this.y + TILE_SIZE-1) ||
+               checkCollision(this.x + TILE_SIZE-1, this.y + TILE_SIZE-1);
+    }
+    
+    // ... остальные методы класса ...
+}
+
+// Исправленная функция спавна врагов
+function spawnEnemies() {
+    enemies = [];
+    const count = 3 + level * 2;
+    for (let i = 0; i < count; i++) {
+        // Гарантируем спавн в верхней трети карты
+        const enemy = new EnemyTank();
+        enemy.x = Math.floor(Math.random() * (MAP_SIZE-2)) * TILE_SIZE + TILE_SIZE;
+        enemy.y = Math.floor(Math.random() * 3) * TILE_SIZE + TILE_SIZE;
+        enemies.push(enemy);
+    }
+}
+
+// Исправленный игровой цикл
+function gameLoop() {
+    if (!gameActive) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    updatePlayer();
+    
+    // Обновление только активных врагов
+    enemies = enemies.filter(enemy => enemy.active);
+    enemies.forEach(enemy => enemy.update());
+    
+    updateBullets();
+    updatePowerups();
+
+    // Проверка условий завершения игры
+    if (enemies.length === 0) {
+        gameOver(true);
+    }
+    
+    drawMap();
+    drawTank(player, '#00FF00');
+    enemies.forEach(enemy => drawTank(enemy, '#FF0000'));
+    drawBullets();
+    drawPowerups();
+    drawHUD();
+
+    requestAnimationFrame(gameLoop);
+}
+
+// Добавляем уничтожение врагов при попадании
+function updateBullets() {
+    bullets.forEach((bullet, bIndex) => {
+        // ... предыдущий код ...
+
+        // Проверка попадания во врагов
+        if (bullet.type === 'player') {
+            enemies.forEach((enemy, eIndex) => {
+                if (enemy.active && checkTankHit(bullet, enemy)) {
+                    enemy.active = false;
+                    bullets.splice(bIndex, 1);
+                    score += 100;
+                    playSound('explosion');
+                }
+            });
+        }
+    });
+}
+
+function checkTankHit(bullet, tank) {
+    return bullet.x > tank.x &&
+           bullet.x < tank.x + TILE_SIZE &&
+           bullet.y > tank.y &&
+           bullet.y < tank.y + TILE_SIZE;
+}
+
+// Инициализация игры
+function initGame() {
+    generateMap();
+    spawnEnemies();
+    gameActive = true;
+    playerHealth = 100;
+    score = 0;
+    player.x = 6 * TILE_SIZE;
+    player.y = 12 * TILE_SIZE;
+    bullets = [];
+    powerups = [];
+    if (level === 1) {
+        document.getElementById('game-over').style.display = 'none';
+    }
+    gameLoop();
+}
+</script>
 </body>
 </html>
